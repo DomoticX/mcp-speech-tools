@@ -195,6 +195,15 @@ def cleanup_stale_outputs() -> dict[str, Any]:
     return {"ok": True, "removed": removed}
 
 
+_DETECTED_LANGUAGE_RE = re.compile(r"auto-detected language:\s*(\w+)")
+
+
+def parse_detected_language(stderr: str | None) -> str | None:
+    """Extract whisper.cpp's 'auto-detected language: xx' log line, if present."""
+    match = _DETECTED_LANGUAGE_RE.search(stderr or "")
+    return match.group(1) if match else None
+
+
 mcp = MCPServer("Speech Tools")
 
 
@@ -213,8 +222,15 @@ def transcribe_audio(
         path: Absolute or relative path to an audio file. Natively supported:
             .wav/.mp3/.ogg/.flac. Also accepted via automatic ffmpeg conversion:
             .aac/.m4a/.wma/.opus. Call list_supported_audio_formats() if unsure.
-        language: Spoken language code (e.g. "en", "nl"), or "auto" to detect.
-        translate: If true, translate the result to English instead of transcribing in the source language.
+        language: The language actually SPOKEN in the audio (e.g. "en", "nl") —
+            this is completely independent of the language the user is chatting
+            in. Never guess this from the conversation language. Leave it as
+            "auto" (the default) unless you already know for certain what
+            language is spoken; forcing the wrong language causes whisper to
+            hallucinate garbled text in that language instead of transcribing
+            correctly. The response's "detected_language" field reports what
+            was actually detected/used.
+        translate: If true, translate the spoken content to English instead of transcribing it in its original language. Unrelated to what language you reply in.
         timestamps: If true, also return per-segment start/end timestamps (writes a temporary JSON file, then removes it).
         model: Optional model filename (relative to bin/whisper) or absolute path. Defaults to config's whisper_model.
     """
@@ -238,7 +254,7 @@ def transcribe_audio(
             whisper_input = audio
 
         if not timestamps:
-            args = ["-m", str(model_path), "-f", str(whisper_input), "-l", lang, "-nt", "-np"]
+            args = ["-m", str(model_path), "-f", str(whisper_input), "-l", lang, "-nt"]
             if translate:
                 args.append("-tr")
 
@@ -247,7 +263,8 @@ def transcribe_audio(
             return {
                 "ok": proc.returncode == 0,
                 "path": str(audio),
-                "language": lang,
+                "requested_language": lang,
+                "detected_language": parse_detected_language(proc.stderr),
                 "text": (proc.stdout or "").strip(),
                 "return_code": proc.returncode,
                 "stderr": (proc.stderr or "").strip() if proc.returncode != 0 else "",
@@ -255,18 +272,20 @@ def transcribe_audio(
 
         # Timestamped segments require a JSON output file; whisper.cpp cannot stream JSON to stdout.
         prefix = make_output_prefix(audio)
-        args = ["-m", str(model_path), "-f", str(whisper_input), "-l", lang, "-np", "-oj", "-of", str(prefix)]
+        args = ["-m", str(model_path), "-f", str(whisper_input), "-l", lang, "-oj", "-of", str(prefix)]
         if translate:
             args.append("-tr")
 
         proc = run_whisper(args)
         json_path = prefix.with_suffix(".json")
+        detected_language = parse_detected_language(proc.stderr)
 
         if proc.returncode != 0 or not json_path.is_file():
             return {
                 "ok": False,
                 "path": str(audio),
-                "language": lang,
+                "requested_language": lang,
+                "detected_language": detected_language,
                 "text": "",
                 "segments": [],
                 "return_code": proc.returncode,
@@ -290,7 +309,8 @@ def transcribe_audio(
         return {
             "ok": True,
             "path": str(audio),
-            "language": lang,
+            "requested_language": lang,
+            "detected_language": detected_language,
             "text": " ".join(s["text"] for s in segments).strip(),
             "segments": segments,
             "return_code": proc.returncode,

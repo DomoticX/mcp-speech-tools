@@ -77,6 +77,15 @@ update them if you move or rename this project folder.
 | `list_whisper_models()` | Lists `ggml-*.bin` models found in `bin/whisper` |
 | `cleanup_temp()` | Manually removes stale temporary WAV/JSON output |
 
+**Note on `language`:** this is the language *spoken in the audio*, not the
+language of the chat/request. Leave it as `"auto"` unless you know for
+certain what's spoken — forcing the wrong language makes whisper
+hallucinate fluent-sounding but completely wrong text in that language
+instead of failing loudly. `transcribe_audio()`'s response includes both
+`requested_language` (what was passed in) and `detected_language` (what
+whisper.cpp actually auto-detected, when `language="auto"`), so a mismatch
+is easy to spot.
+
 **Supported formats:**
 
 - Native (whisper.cpp / miniaudio): `.wav`, `.mp3`, `.ogg`, `.flac`
