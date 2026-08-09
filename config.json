@@ -1,8 +1,11 @@
 {
   "whisper_path": "K:\\mcp-tools\\mcp-speech-tools\\bin\\whisper\\whisper-cli.exe",
   "whisper_model": "ggml-base.bin",
-  "whisper_output_dir": "K:\\mcp-tools\\mcp-speech-tools\\temp",
   "ffmpeg_path": "K:\\mcp-tools\\mcp-speech-tools\\bin\\ffmpeg\\ffmpeg.exe",
+  "piper_path": "K:\\mcp-tools\\mcp-speech-tools\\bin\\piper\\piper.exe",
+  "piper_model": "jarvis-high.onnx",
+  "ffplay_path": "K:\\mcp-tools\\mcp-speech-tools\\bin\\ffmpeg\\ffplay.exe",
+  "temp_dir": "K:\\mcp-tools\\mcp-speech-tools\\temp",
   "default_language": "auto",
   "command_timeout_seconds": 600,
   "cleanup_stale_after_seconds": 3600

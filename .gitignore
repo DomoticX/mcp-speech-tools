@@ -7,6 +7,10 @@ bin/whisper/*
 bin/ffmpeg/*
 !bin/ffmpeg/README.md
 
+!bin/piper/
+bin/piper/*
+!bin/piper/README.md
+
 temp/*
 !temp/README.md
 

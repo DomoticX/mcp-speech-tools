@@ -1,10 +1,15 @@
 # bin/ffmpeg
 
 This folder is where the ffmpeg Windows binaries go, used by
-`mcp-speech-tools.py` to convert audio formats that whisper.cpp can't read
-natively (AAC, M4A, WMA, Opus) to WAV before transcription. Binaries are
-not committed to the repository (see `.gitignore`) — download them
-yourself.
+`mcp-speech-tools.py` for two things:
+
+- `ffmpeg.exe` converts audio formats whisper.cpp can't read natively
+  (AAC, M4A, WMA, Opus) to WAV before transcription.
+- `ffplay.exe` plays Piper's synthesized WAV output out loud on the
+  default audio device for `speak()`.
+
+Binaries are not committed to the repository (see `.gitignore`) —
+download them yourself.
 
 ## Download
 
@@ -37,8 +42,9 @@ bin/ffmpeg/
 
 ## Required files
 
-- `ffmpeg.exe` — the only binary actually invoked by the MCP server.
-  `ffplay.exe` / `ffprobe.exe` are not used but harmless to leave in place.
+- `ffmpeg.exe` — used for AAC/M4A/WMA/Opus → WAV conversion before STT.
+- `ffplay.exe` — used to play back Piper's synthesized WAV for `speak()`.
+- `ffprobe.exe` is not used but harmless to leave in place.
 
 ## What it's used for
 
@@ -48,3 +54,8 @@ audio files whisper.cpp cannot decode itself (`.aac`, `.m4a`, `.wma`,
 `temp/`, runs whisper-cli.exe against that, then deletes the temporary
 WAV. Natively supported formats (`.wav`, `.mp3`, `.ogg`, `.flac`) go
 straight to whisper-cli.exe — ffmpeg is skipped entirely for those.
+
+`speak()` calls `ffplay.exe` (`-nodisp -autoexit`, no visible window) on
+the WAV file Piper just synthesized, on the default audio output device.
+Playback runs in the background so the tool call returns as soon as
+playback starts, not when it finishes.
