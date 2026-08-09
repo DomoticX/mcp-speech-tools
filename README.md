@@ -16,6 +16,10 @@ yet.
   (`-oj -of <temp prefix>`), since whisper.cpp can't stream structured
   output to stdout. The JSON is read back into per-segment
   start/end/text data and the temp file is deleted immediately after.
+- If the input file isn't a format whisper.cpp can read natively
+  (`.aac`/`.m4a`/`.wma`/`.opus`), it's first converted to a temporary
+  16kHz mono PCM WAV with `ffmpeg.exe`, then transcribed, then the
+  temporary WAV is deleted.
 
 ## Requirements
 
@@ -27,6 +31,8 @@ yet.
   ```
 - `whisper-cli.exe` + a `ggml-*.bin` model — see
   [bin/whisper/README.md](bin/whisper/README.md) for download instructions.
+- `ffmpeg.exe` — only needed to transcribe AAC/M4A/WMA/Opus files, see
+  [bin/ffmpeg/README.md](bin/ffmpeg/README.md) for download instructions.
 
 ## Directory layout
 
@@ -35,10 +41,12 @@ mcp-speech-tools/
 ├── mcp-speech-tools.py   # server entry point
 ├── config.json            # runtime configuration
 ├── bin/
-│   └── whisper/            # whisper.cpp binaries + models (not committed, see bin/whisper/README.md)
-│       ├── whisper-cli.exe
-│       └── ggml-base.bin
-└── temp/                    # temporary JSON output for timestamped transcriptions
+│   ├── whisper/             # whisper.cpp binaries + models (not committed, see bin/whisper/README.md)
+│   │   ├── whisper-cli.exe
+│   │   └── ggml-base.bin
+│   └── ffmpeg/              # ffmpeg binary, for AAC/M4A/WMA/Opus conversion (not committed, see bin/ffmpeg/README.md)
+│       └── ffmpeg.exe
+└── temp/                    # temporary WAV/JSON output for conversion and timestamped transcriptions
 ```
 
 ## Configuration
@@ -50,28 +58,34 @@ to built-in defaults for any key that's missing:
 | --- | --- | --- |
 | `whisper_path` | `bin/whisper/whisper-cli.exe` | Path to the whisper.cpp CLI binary |
 | `whisper_model` | `ggml-base.bin` | Default model filename, resolved relative to `whisper_path`'s folder |
-| `whisper_output_dir` | `temp/` | Where temporary JSON output is written when `timestamps=True` |
+| `whisper_output_dir` | `temp/` | Where temporary WAV (converted audio) and JSON (timestamped) output is written |
+| `ffmpeg_path` | `bin/ffmpeg/ffmpeg.exe` | Path to ffmpeg, used only to convert AAC/M4A/WMA/Opus to WAV before transcription |
 | `default_language` | `auto` | Spoken language used when a call doesn't specify one |
-| `command_timeout_seconds` | `600` | Timeout for each `whisper-cli.exe` invocation |
+| `command_timeout_seconds` | `600` | Timeout for each `whisper-cli.exe` / `ffmpeg.exe` invocation |
 | `cleanup_stale_after_seconds` | `3600` | Age (seconds) after which leftover temp files are removed on startup / via `cleanup_temp()` |
 
-**Note:** `whisper_path` and `whisper_output_dir` in `config.json` must
-point at paths that actually exist on your machine — update them if you
-move or rename this project folder.
+**Note:** `whisper_path`, `ffmpeg_path` and `whisper_output_dir` in
+`config.json` must point at paths that actually exist on your machine —
+update them if you move or rename this project folder.
 
 ## MCP tools
 
 | Tool | Description |
 | --- | --- |
-| `transcribe_audio(path, language="auto", translate=False, timestamps=False, model=None)` | Transcribes (or translates to English) a `.wav`/`.mp3`/`.ogg`/`.flac` file |
-| `list_supported_audio_formats()` | Lists the accepted audio extensions |
+| `transcribe_audio(path, language="auto", translate=False, timestamps=False, model=None)` | Transcribes (or translates to English) an audio file |
+| `list_supported_audio_formats()` | Lists native vs. ffmpeg-converted audio extensions |
 | `list_whisper_models()` | Lists `ggml-*.bin` models found in `bin/whisper` |
-| `cleanup_temp()` | Manually removes stale temporary JSON output |
+| `cleanup_temp()` | Manually removes stale temporary WAV/JSON output |
 
-**Supported formats:** `.wav`, `.mp3`, `.ogg`, `.flac` — these are the only
-formats whisper.cpp can decode natively (via miniaudio). **AAC/M4A/WMA/Opus
-are not supported** and there's currently no ffmpeg conversion step to
-handle them; convert those to one of the supported formats first.
+**Supported formats:**
+
+- Native (whisper.cpp / miniaudio): `.wav`, `.mp3`, `.ogg`, `.flac`
+- Converted via ffmpeg first: `.aac`, `.m4a`, `.wma`, `.opus`
+
+Anything else is rejected. Conversion requires `ffmpeg.exe` to be present
+(see [bin/ffmpeg/README.md](bin/ffmpeg/README.md)); if it's missing,
+transcribing an AAC/M4A/WMA/Opus file fails with a clear error pointing to
+that README.
 
 ## Running
 

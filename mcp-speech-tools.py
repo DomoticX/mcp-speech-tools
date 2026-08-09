@@ -43,14 +43,17 @@ DEFAULT_CONFIG = {
     "whisper_path": str(BASE_DIR / "bin" / "whisper" / "whisper-cli.exe"),
     "whisper_model": "ggml-base.bin",
     "whisper_output_dir": str(BASE_DIR / "temp"),
+    "ffmpeg_path": str(BASE_DIR / "bin" / "ffmpeg" / "ffmpeg.exe"),
     "default_language": "auto",
     "command_timeout_seconds": 600,
     "cleanup_stale_after_seconds": 3600,
 }
 
-# Natively decoded by whisper.cpp (via miniaudio) — no ffmpeg conversion step exists yet.
-# AAC/M4A/WMA/Opus/etc. are NOT supported; convert to one of these first.
-SUPPORTED_AUDIO_EXTS = {".wav", ".mp3", ".ogg", ".flac"}
+# Natively decoded by whisper.cpp (via miniaudio) — no conversion needed.
+NATIVE_AUDIO_EXTS = {".wav", ".mp3", ".ogg", ".flac"}
+# Not readable by whisper.cpp directly; converted to WAV via ffmpeg first.
+CONVERTIBLE_AUDIO_EXTS = {".aac", ".m4a", ".wma", ".opus"}
+SUPPORTED_AUDIO_EXTS = NATIVE_AUDIO_EXTS | CONVERTIBLE_AUDIO_EXTS
 
 
 def load_config() -> dict[str, Any]:
@@ -69,6 +72,7 @@ def load_config() -> dict[str, Any]:
 
 CONFIG = load_config()
 WHISPER_CLI = Path(CONFIG["whisper_path"]).expanduser()
+FFMPEG = Path(CONFIG["ffmpeg_path"]).expanduser()
 
 
 def resolve_model_path(model: str | None) -> Path:
@@ -80,16 +84,8 @@ def resolve_model_path(model: str | None) -> Path:
     return p
 
 
-def run_whisper(args: list[str], timeout: int | None = None) -> subprocess.CompletedProcess[str]:
-    """Run whisper-cli.exe without opening a console window on Windows."""
-    if not WHISPER_CLI.is_file():
-        raise FileNotFoundError(
-            f"whisper-cli.exe not found: {WHISPER_CLI}. "
-            f"Set 'whisper_path' in {CONFIG_FILE} (see bin/whisper/README.md for download info)."
-        )
-
-    timeout = timeout or int(CONFIG["command_timeout_seconds"])
-
+def _run_hidden(exe: Path, args: list[str], timeout: int) -> subprocess.CompletedProcess[str]:
+    """Run an executable without opening a console window on Windows."""
     startupinfo = None
     creationflags = 0
 
@@ -101,7 +97,7 @@ def run_whisper(args: list[str], timeout: int | None = None) -> subprocess.Compl
         creationflags = subprocess.CREATE_NO_WINDOW
 
     return subprocess.run(
-        [str(WHISPER_CLI), *args],
+        [str(exe), *args],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -114,6 +110,41 @@ def run_whisper(args: list[str], timeout: int | None = None) -> subprocess.Compl
     )
 
 
+def run_whisper(args: list[str], timeout: int | None = None) -> subprocess.CompletedProcess[str]:
+    if not WHISPER_CLI.is_file():
+        raise FileNotFoundError(
+            f"whisper-cli.exe not found: {WHISPER_CLI}. "
+            f"Set 'whisper_path' in {CONFIG_FILE} (see bin/whisper/README.md for download info)."
+        )
+
+    return _run_hidden(WHISPER_CLI, args, timeout or int(CONFIG["command_timeout_seconds"]))
+
+
+def run_ffmpeg(args: list[str], timeout: int | None = None) -> subprocess.CompletedProcess[str]:
+    if not FFMPEG.is_file():
+        raise FileNotFoundError(
+            f"ffmpeg.exe not found: {FFMPEG}. "
+            f"Set 'ffmpeg_path' in {CONFIG_FILE} (see bin/ffmpeg/README.md for download info)."
+        )
+
+    return _run_hidden(FFMPEG, args, timeout or int(CONFIG["command_timeout_seconds"]))
+
+
+def convert_to_wav(audio: Path) -> Path:
+    """Convert a non-natively-supported audio file to a temp 16kHz mono PCM WAV via ffmpeg."""
+    out_path = make_output_prefix(audio).with_suffix(".wav")
+
+    proc = run_ffmpeg(["-y", "-i", str(audio), "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", str(out_path)])
+
+    if proc.returncode != 0 or not out_path.is_file():
+        raise RuntimeError(
+            f"ffmpeg conversion failed (code {proc.returncode}) for {audio}: "
+            f"{(proc.stderr or '').strip()[-2000:]}"
+        )
+
+    return out_path
+
+
 def validate_audio_path(path: str) -> Path:
     p = Path(path).expanduser().resolve()
 
@@ -123,7 +154,9 @@ def validate_audio_path(path: str) -> Path:
         raise ValueError(f"Path is not a file: {p}")
     if p.suffix.lower() not in SUPPORTED_AUDIO_EXTS:
         raise ValueError(
-            f"Unsupported audio format '{p.suffix}'. Supported: {', '.join(sorted(SUPPORTED_AUDIO_EXTS))}"
+            f"Unsupported audio format '{p.suffix}'. "
+            f"Native: {', '.join(sorted(NATIVE_AUDIO_EXTS))}. "
+            f"Converted via ffmpeg: {', '.join(sorted(CONVERTIBLE_AUDIO_EXTS))}."
         )
 
     return p
@@ -177,8 +210,9 @@ def transcribe_audio(
     Transcribe (or translate to English) an audio file using whisper.cpp.
 
     Args:
-        path: Absolute or relative path to a .wav/.mp3/.ogg/.flac file.
-            Call list_supported_audio_formats() to check first if unsure.
+        path: Absolute or relative path to an audio file. Natively supported:
+            .wav/.mp3/.ogg/.flac. Also accepted via automatic ffmpeg conversion:
+            .aac/.m4a/.wma/.opus. Call list_supported_audio_formats() if unsure.
         language: Spoken language code (e.g. "en", "nl"), or "auto" to detect.
         translate: If true, translate the result to English instead of transcribing in the source language.
         timestamps: If true, also return per-segment start/end timestamps (writes a temporary JSON file, then removes it).
@@ -195,65 +229,76 @@ def transcribe_audio(
 
     lang = language or CONFIG.get("default_language", "auto")
 
-    if not timestamps:
-        args = ["-m", str(model_path), "-f", str(audio), "-l", lang, "-nt", "-np"]
+    converted_path: Path | None = None
+    try:
+        if audio.suffix.lower() in CONVERTIBLE_AUDIO_EXTS:
+            converted_path = convert_to_wav(audio)
+            whisper_input = converted_path
+        else:
+            whisper_input = audio
+
+        if not timestamps:
+            args = ["-m", str(model_path), "-f", str(whisper_input), "-l", lang, "-nt", "-np"]
+            if translate:
+                args.append("-tr")
+
+            proc = run_whisper(args)
+
+            return {
+                "ok": proc.returncode == 0,
+                "path": str(audio),
+                "language": lang,
+                "text": (proc.stdout or "").strip(),
+                "return_code": proc.returncode,
+                "stderr": (proc.stderr or "").strip() if proc.returncode != 0 else "",
+            }
+
+        # Timestamped segments require a JSON output file; whisper.cpp cannot stream JSON to stdout.
+        prefix = make_output_prefix(audio)
+        args = ["-m", str(model_path), "-f", str(whisper_input), "-l", lang, "-np", "-oj", "-of", str(prefix)]
         if translate:
             args.append("-tr")
 
         proc = run_whisper(args)
+        json_path = prefix.with_suffix(".json")
+
+        if proc.returncode != 0 or not json_path.is_file():
+            return {
+                "ok": False,
+                "path": str(audio),
+                "language": lang,
+                "text": "",
+                "segments": [],
+                "return_code": proc.returncode,
+                "stderr": (proc.stderr or "").strip(),
+            }
+
+        try:
+            data = json.loads(json_path.read_text(encoding="utf-8"))
+        finally:
+            json_path.unlink(missing_ok=True)
+
+        segments = [
+            {
+                "start_ms": seg.get("offsets", {}).get("from"),
+                "end_ms": seg.get("offsets", {}).get("to"),
+                "text": (seg.get("text") or "").strip(),
+            }
+            for seg in data.get("transcription", [])
+        ]
 
         return {
-            "ok": proc.returncode == 0,
+            "ok": True,
             "path": str(audio),
             "language": lang,
-            "text": (proc.stdout or "").strip(),
+            "text": " ".join(s["text"] for s in segments).strip(),
+            "segments": segments,
             "return_code": proc.returncode,
-            "stderr": (proc.stderr or "").strip() if proc.returncode != 0 else "",
+            "stderr": "",
         }
-
-    # Timestamped segments require a JSON output file; whisper.cpp cannot stream JSON to stdout.
-    prefix = make_output_prefix(audio)
-    args = ["-m", str(model_path), "-f", str(audio), "-l", lang, "-np", "-oj", "-of", str(prefix)]
-    if translate:
-        args.append("-tr")
-
-    proc = run_whisper(args)
-    json_path = prefix.with_suffix(".json")
-
-    if proc.returncode != 0 or not json_path.is_file():
-        return {
-            "ok": False,
-            "path": str(audio),
-            "language": lang,
-            "text": "",
-            "segments": [],
-            "return_code": proc.returncode,
-            "stderr": (proc.stderr or "").strip(),
-        }
-
-    try:
-        data = json.loads(json_path.read_text(encoding="utf-8"))
     finally:
-        json_path.unlink(missing_ok=True)
-
-    segments = [
-        {
-            "start_ms": seg.get("offsets", {}).get("from"),
-            "end_ms": seg.get("offsets", {}).get("to"),
-            "text": (seg.get("text") or "").strip(),
-        }
-        for seg in data.get("transcription", [])
-    ]
-
-    return {
-        "ok": True,
-        "path": str(audio),
-        "language": lang,
-        "text": " ".join(s["text"] for s in segments).strip(),
-        "segments": segments,
-        "return_code": proc.returncode,
-        "stderr": "",
-    }
+        if converted_path is not None:
+            converted_path.unlink(missing_ok=True)
 
 
 @mcp.tool()
@@ -261,14 +306,16 @@ def list_supported_audio_formats() -> dict[str, Any]:
     """
     List audio file extensions that transcribe_audio() accepts.
 
-    These are natively decoded by whisper.cpp; there is no ffmpeg conversion
-    step, so formats like AAC/M4A/WMA/Opus are NOT supported and must be
-    converted to one of the listed formats first.
+    "native" formats are decoded by whisper.cpp directly. "convert_via_ffmpeg"
+    formats are transparently converted to a temporary WAV file with ffmpeg
+    before transcription — this requires ffmpeg.exe to be present (see
+    bin/ffmpeg/README.md). Any other extension is rejected.
     """
     return {
         "ok": True,
-        "supported_extensions": sorted(SUPPORTED_AUDIO_EXTS),
-        "note": "Natively decoded by whisper.cpp only; no automatic conversion for other formats (e.g. AAC/M4A/WMA/Opus).",
+        "native": sorted(NATIVE_AUDIO_EXTS),
+        "convert_via_ffmpeg": sorted(CONVERTIBLE_AUDIO_EXTS),
+        "ffmpeg_available": FFMPEG.is_file(),
     }
 
 

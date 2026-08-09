@@ -3,6 +3,10 @@ bin/*
 bin/whisper/*
 !bin/whisper/README.md
 
+!bin/ffmpeg/
+bin/ffmpeg/*
+!bin/ffmpeg/README.md
+
 temp/*
 !temp/README.md
 
