@@ -152,21 +152,20 @@ kept deliberately separate from this server: the MCP stays a plain
 technical capability, the *when/how* lives in the agent's instructions.
 
 [.claude/skills/speak-replies/SKILL.md](.claude/skills/speak-replies/SKILL.md)
-is a ready-made Claude Code skill for this. Copy the
-`.claude/skills/speak-replies/` folder into the `.claude/skills/` of
-whichever project you want spoken replies in (or into
-`~/.claude/skills/` to make it available everywhere), then invoke it with:
-
-- `/speak-replies` — speak a short summary after every reply (default)
-- `/speak-replies all` — speak the substance of the full reply, not just a summary
-- `/speak-replies off` — stop
+is a ready-made skill for this, in the generic `name` + `description` +
+Markdown-instructions format used by both Claude Code and Goose skill
+folders (no slash-command syntax — it triggers off its `description`
+matching what the user asks for, same as this repo's own skills). Copy
+`speak-replies/` into wherever your agent loads skills from — e.g.
+Claude Code's `.claude/skills/` (project) or `~/.claude/skills/`
+(global), or Goose's `~/.agents/skills/` (or wherever your setup points
+Goose at) — and it activates automatically when the user asks for spoken
+replies in plain language ("spreek je antwoorden uit", "turn on spoken
+replies", "read that aloud", ...), and turns off again when asked to stop.
 
 It's a per-conversation instruction (resets on a new session), and
 composes the spoken text following the same rules as above: short,
 natural, plain language, no code/JSON/paths/tables/logs.
-
-For non-Claude-Code agents (Goose, etc.), adapt the same instructions
-into whatever system-prompt/rule mechanism they support.
 
 ## Running
 
