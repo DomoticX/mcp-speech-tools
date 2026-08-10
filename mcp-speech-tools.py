@@ -53,7 +53,7 @@ DEFAULT_CONFIG = {
     "whisper_model": "ggml-base.bin",
     "ffmpeg_path": str(BASE_DIR / "bin" / "ffmpeg" / "ffmpeg.exe"),
     "piper_path": str(BASE_DIR / "bin" / "piper" / "piper.exe"),
-    "piper_model": "jarvis-high.onnx",
+    "piper_model": "nl_NL-pim-medium.onnx",
     "ffplay_path": str(BASE_DIR / "bin" / "ffmpeg" / "ffplay.exe"),
     "temp_dir": str(BASE_DIR / "temp"),
     "default_language": "auto",
