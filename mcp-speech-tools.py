@@ -64,7 +64,8 @@ DEFAULT_CONFIG = {
 # Natively decoded by whisper.cpp (via miniaudio) — no conversion needed.
 NATIVE_AUDIO_EXTS = {".wav", ".mp3", ".ogg", ".flac"}
 # Not readable by whisper.cpp directly; converted to WAV via ffmpeg first.
-CONVERTIBLE_AUDIO_EXTS = {".aac", ".m4a", ".wma", ".opus"}
+# Includes video containers — ffmpeg just extracts/decodes the audio track.
+CONVERTIBLE_AUDIO_EXTS = {".aac", ".m4a", ".wma", ".opus", ".mp4", ".mkv", ".mov", ".webm", ".avi"}
 SUPPORTED_AUDIO_EXTS = NATIVE_AUDIO_EXTS | CONVERTIBLE_AUDIO_EXTS
 
 
@@ -386,14 +387,18 @@ def transcribe_audio(
     translate: bool = False,
     timestamps: bool = False,
     model: str | None = None,
+    offset_seconds: float | None = None,
+    duration_seconds: float | None = None,
 ) -> dict[str, Any]:
     """
     Transcribe (or translate to English) an audio file using whisper.cpp.
 
     Args:
-        path: Absolute or relative path to an audio file. Natively supported:
-            .wav/.mp3/.ogg/.flac. Also accepted via automatic ffmpeg conversion:
-            .aac/.m4a/.wma/.opus. Call list_supported_audio_formats() if unsure.
+        path: Absolute or relative path to an audio/video file. Natively
+            supported: .wav/.mp3/.ogg/.flac. Also accepted via automatic
+            ffmpeg conversion: .aac/.m4a/.wma/.opus, and video containers
+            .mp4/.mkv/.mov/.webm/.avi (only the audio track is used). Call
+            list_supported_audio_formats() if unsure.
         language: The language actually SPOKEN in the audio (e.g. "en", "nl") —
             this is completely independent of the language the user is chatting
             in. Never guess this from the conversation language. Leave it as
@@ -405,6 +410,13 @@ def transcribe_audio(
         translate: If true, translate the spoken content to English instead of transcribing it in its original language. Unrelated to what language you reply in.
         timestamps: If true, also return per-segment start/end timestamps (writes a temporary JSON file, then removes it).
         model: Optional model filename (relative to bin/whisper) or absolute path. Defaults to config's whisper_model.
+        offset_seconds: If set, skip this many seconds from the start before transcribing (e.g. "transcribe starting at 0:30" -> 30).
+        duration_seconds: If set, only transcribe this many seconds (e.g. "the first 20 seconds" -> offset_seconds left unset, duration_seconds=20).
+            Use these two instead of pre-cutting/converting the file yourself
+            with an external ffmpeg call — whisper.cpp windows the audio
+            natively, and manually pre-cutting creates stray files outside
+            this server's temp_dir (next to the source file), which this
+            tool is specifically designed to avoid.
     """
     audio = validate_audio_path(path)
     model_path = resolve_model_path(model)
@@ -414,8 +426,18 @@ def transcribe_audio(
             f"Whisper model not found: {model_path}. "
             f"Download a ggml model into {model_path.parent} (see bin/whisper/README.md)."
         )
+    if offset_seconds is not None and offset_seconds < 0:
+        raise ValueError("offset_seconds must not be negative")
+    if duration_seconds is not None and duration_seconds <= 0:
+        raise ValueError("duration_seconds must be positive")
 
     lang = language or CONFIG.get("default_language", "auto")
+
+    window_args: list[str] = []
+    if offset_seconds is not None:
+        window_args += ["-ot", str(round(offset_seconds * 1000))]
+    if duration_seconds is not None:
+        window_args += ["-d", str(round(duration_seconds * 1000))]
 
     converted_path: Path | None = None
     try:
@@ -426,7 +448,7 @@ def transcribe_audio(
             whisper_input = audio
 
         if not timestamps:
-            args = ["-m", str(model_path), "-f", str(whisper_input), "-l", lang, "-nt"]
+            args = ["-m", str(model_path), "-f", str(whisper_input), "-l", lang, "-nt", *window_args]
             if translate:
                 args.append("-tr")
 
@@ -444,7 +466,7 @@ def transcribe_audio(
 
         # Timestamped segments require a JSON output file; whisper.cpp cannot stream JSON to stdout.
         prefix = make_temp_prefix(audio.stem)
-        args = ["-m", str(model_path), "-f", str(whisper_input), "-l", lang, "-oj", "-of", str(prefix)]
+        args = ["-m", str(model_path), "-f", str(whisper_input), "-l", lang, "-oj", "-of", str(prefix), *window_args]
         if translate:
             args.append("-tr")
 
@@ -496,12 +518,13 @@ def transcribe_audio(
 @mcp.tool()
 def list_supported_audio_formats() -> dict[str, Any]:
     """
-    List audio file extensions that transcribe_audio() accepts.
+    List audio/video file extensions that transcribe_audio() accepts.
 
     "native" formats are decoded by whisper.cpp directly. "convert_via_ffmpeg"
-    formats are transparently converted to a temporary WAV file with ffmpeg
-    before transcription — this requires ffmpeg.exe to be present (see
-    bin/ffmpeg/README.md). Any other extension is rejected.
+    formats (including video containers, audio track only) are transparently
+    converted to a temporary WAV file with ffmpeg before transcription — this
+    requires ffmpeg.exe to be present (see bin/ffmpeg/README.md). Any other
+    extension is rejected.
     """
     return {
         "ok": True,

@@ -18,9 +18,12 @@ MCP server for local Text-To-Speech (TTS) and Speech-To-Text (STT).
   output to stdout. The JSON is read back into per-segment
   start/end/text data and the temp file is deleted immediately after.
 - If the input file isn't a format whisper.cpp can read natively
-  (`.aac`/`.m4a`/`.wma`/`.opus`), it's first converted to a temporary
-  16kHz mono PCM WAV with `ffmpeg.exe`, then transcribed, then the
-  temporary WAV is deleted.
+  (`.aac`/`.m4a`/`.wma`/`.opus`, or a video container like `.mp4`), it's
+  first converted to a temporary 16kHz mono PCM WAV with `ffmpeg.exe`,
+  then transcribed, then the temporary WAV is deleted.
+- `offset_seconds`/`duration_seconds` let you transcribe just part of a
+  file ("the first 20 seconds", "starting at 0:30") using whisper.cpp's
+  own windowing — no separate cutting step, no extra files.
 
 **TTS** — `speak` sends text to `piper.exe` on stdin, which synthesizes a
 temporary WAV file; that WAV is then played through `ffplay.exe`
@@ -43,7 +46,7 @@ audio file.
 - `whisper-cli.exe` + a `ggml-*.bin` model — see
   [bin/whisper/README.md](bin/whisper/README.md) for download instructions.
 - `ffmpeg.exe` + `ffplay.exe` — ffmpeg only needed to transcribe
-  AAC/M4A/WMA/Opus files, ffplay needed for `speak()` playback. See
+  AAC/M4A/WMA/Opus/video files, ffplay needed for `speak()` playback. See
   [bin/ffmpeg/README.md](bin/ffmpeg/README.md) for download instructions.
 - `piper.exe` + a voice (`.onnx` + `.onnx.json`) — see
   [bin/piper/README.md](bin/piper/README.md) for download instructions.
@@ -96,8 +99,8 @@ your machine — update them if you move or rename this project folder.
 
 | Tool | Description |
 | --- | --- |
-| `transcribe_audio(path, language="auto", translate=False, timestamps=False, model=None)` | Transcribes (or translates to English) an audio file |
-| `list_supported_audio_formats()` | Lists native vs. ffmpeg-converted audio extensions |
+| `transcribe_audio(path, language="auto", translate=False, timestamps=False, model=None, offset_seconds=None, duration_seconds=None)` | Transcribes (or translates to English) an audio/video file, optionally windowed to part of it |
+| `list_supported_audio_formats()` | Lists native vs. ffmpeg-converted audio/video extensions |
 | `list_whisper_models()` | Lists `ggml-*.bin` models found in `bin/whisper` |
 
 **Note on `language`:** this is the language *spoken in the audio*, not the
@@ -109,15 +112,23 @@ instead of failing loudly. `transcribe_audio()`'s response includes both
 whisper.cpp actually auto-detected, when `language="auto"`), so a mismatch
 is easy to spot.
 
+**Note on `offset_seconds`/`duration_seconds`:** use these for "transcribe
+the first 20 seconds" / "starting at 0:30" instead of pre-cutting the file
+yourself with an external ffmpeg call — whisper.cpp windows the audio
+natively (`-ot`/`-d`). Pre-cutting it yourself creates stray WAV files next
+to the source file instead of in this server's `temp_dir`, which this tool
+is specifically designed to avoid.
+
 **Supported formats:**
 
 - Native (whisper.cpp / miniaudio): `.wav`, `.mp3`, `.ogg`, `.flac`
-- Converted via ffmpeg first: `.aac`, `.m4a`, `.wma`, `.opus`
+- Converted via ffmpeg first: `.aac`, `.m4a`, `.wma`, `.opus`, and video
+  containers `.mp4`, `.mkv`, `.mov`, `.webm`, `.avi` (audio track only)
 
 Anything else is rejected. Conversion requires `ffmpeg.exe` to be present
 (see [bin/ffmpeg/README.md](bin/ffmpeg/README.md)); if it's missing,
-transcribing an AAC/M4A/WMA/Opus file fails with a clear error pointing to
-that README.
+transcribing one of the converted formats fails with a clear error
+pointing to that README.
 
 ### Text-to-speech
 

@@ -4,7 +4,8 @@ This folder is where the ffmpeg Windows binaries go, used by
 `mcp-speech-tools.py` for two things:
 
 - `ffmpeg.exe` converts audio formats whisper.cpp can't read natively
-  (AAC, M4A, WMA, Opus) to WAV before transcription.
+  (AAC, M4A, WMA, Opus) — and video containers (MP4, MKV, MOV, WebM, AVI,
+  audio track only) — to WAV before transcription.
 - `ffplay.exe` plays Piper's synthesized WAV output out loud on the
   default audio device for `speak()`.
 
@@ -42,18 +43,24 @@ bin/ffmpeg/
 
 ## Required files
 
-- `ffmpeg.exe` — used for AAC/M4A/WMA/Opus → WAV conversion before STT.
+- `ffmpeg.exe` — used for AAC/M4A/WMA/Opus and MP4/MKV/MOV/WebM/AVI → WAV conversion before STT.
 - `ffplay.exe` — used to play back Piper's synthesized WAV for `speak()`.
 - `ffprobe.exe` is not used but harmless to leave in place.
 
 ## What it's used for
 
 `transcribe_audio()` in `mcp-speech-tools.py` calls `ffmpeg.exe` only for
-audio files whisper.cpp cannot decode itself (`.aac`, `.m4a`, `.wma`,
-`.opus`). It converts them to a temporary 16kHz mono PCM WAV file in
-`temp/`, runs whisper-cli.exe against that, then deletes the temporary
-WAV. Natively supported formats (`.wav`, `.mp3`, `.ogg`, `.flac`) go
-straight to whisper-cli.exe — ffmpeg is skipped entirely for those.
+files whisper.cpp cannot decode itself (`.aac`, `.m4a`, `.wma`, `.opus`,
+or a video container `.mp4`/`.mkv`/`.mov`/`.webm`/`.avi`). It converts
+them to a temporary 16kHz mono PCM WAV file in `temp/`, runs
+whisper-cli.exe against that, then deletes the temporary WAV. Natively
+supported formats (`.wav`, `.mp3`, `.ogg`, `.flac`) go straight to
+whisper-cli.exe — ffmpeg is skipped entirely for those.
+
+If you only need part of a long file transcribed, pass `offset_seconds`
+and/or `duration_seconds` to `transcribe_audio()` instead of pre-cutting
+it yourself — whisper.cpp windows the audio natively (`-ot`/`-d`), so
+nothing extra gets written outside `temp/`.
 
 `speak()` calls `ffplay.exe` (`-nodisp -autoexit`, no visible window) on
 the WAV file Piper just synthesized, on the default audio output device.
