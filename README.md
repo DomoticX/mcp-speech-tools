@@ -180,9 +180,55 @@ natural, plain language, no code/JSON/paths/tables/logs.
 
 ## Running
 
-The server communicates over stdio, the standard transport when started as
-an MCP extension (e.g. by Goose or Claude Desktop):
+Two transports are supported, picked with `--transport`:
+
+- **`stdio`** (default) — the client launches this script itself and talks
+  to it over stdin/stdout. This is what Goose/Claude Desktop use below.
+- **`streamable-http`** — runs a standalone HTTP server instead, for a
+  client that connects over the network rather than spawning the process.
 
 ```bash
-python mcp-speech-tools.py
+python K:\mcp-tools\mcp-speech-tools\mcp-speech-tools.py --transport stdio
 ```
+
+```bash
+python K:\mcp-tools\mcp-speech-tools\mcp-speech-tools.py --transport streamable-http --host 0.0.0.0 --port 8000
+```
+
+`--host`/`--port` are only used for `streamable-http` (defaults:
+`127.0.0.1:8000`); the HTTP endpoint is `POST /mcp`. `uvicorn`, which serves
+it, is already a hard dependency of the `mcp` package — nothing extra to
+install.
+
+**Claude Desktop** — add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "speech-tools": {
+      "command": "python",
+      "args": ["K:\\mcp-tools\\mcp-speech-tools\\mcp-speech-tools.py", "--transport", "stdio"]
+    }
+  }
+}
+```
+
+**Goose** — add to `~/.config/goose/config.yaml`:
+
+```yaml
+extensions:
+  speech-tools:
+    type: stdio
+    cmd: python
+    args: ["K:\\mcp-tools\\mcp-speech-tools\\mcp-speech-tools.py", "--transport", "stdio"]
+    enabled: true
+```
+
+**Goose (or any client) over HTTP** — start the server separately:
+
+```bash
+python K:\mcp-tools\mcp-speech-tools\mcp-speech-tools.py --transport streamable-http --host 0.0.0.0 --port 8000
+```
+
+then point the client at an HTTP-type extension/server pointing to
+`http://<host>:8000/mcp` instead of a `command`/`cmd` entry.

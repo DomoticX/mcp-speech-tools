@@ -25,10 +25,15 @@ Directory example:
                 <voice>.onnx
                 <voice>.onnx.json
         temp\\
+
+Transport:
+    python mcp-speech-tools.py --transport stdio                    (default)
+    python mcp-speech-tools.py --transport streamable-http --host 0.0.0.0 --port 8000
 """
 
 from __future__ import annotations
 
+import argparse
 import atexit
 import json
 import re
@@ -268,7 +273,7 @@ def cleanup_stale_outputs() -> dict[str, Any]:
     removed: list[str] = []
 
     for child in root.iterdir():
-        if not child.is_file():
+        if not child.is_file() or child.name == "README.md":
             continue
         try:
             age = now - child.stat().st_mtime
@@ -702,8 +707,29 @@ def cleanup_temp() -> dict[str, Any]:
     return cleanup_stale_outputs()
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="mcp-speech-tools MCP server")
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "streamable-http"],
+        default="stdio",
+        help='Transport to serve over. "stdio" (default) is what an MCP '
+             'client (Goose, Claude Desktop, ...) uses when it launches this '
+             'script itself. "streamable-http" runs a standalone HTTP server '
+             'instead, for clients that connect over the network.',
+    )
+    parser.add_argument("--host", default="127.0.0.1", help="Host to bind for --transport streamable-http (default: 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=8000, help="Port to bind for --transport streamable-http (default: 8000)")
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
+    args = parse_args()
+
     # Remove leftovers from old sessions before starting.
     cleanup_stale_outputs()
-    # stdio is the normal transport when Goose/Claude starts this script as an extension.
-    mcp.run()
+
+    if args.transport == "stdio":
+        mcp.run()
+    else:
+        mcp.run(transport="streamable-http", host=args.host, port=args.port)
