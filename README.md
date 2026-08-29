@@ -93,6 +93,43 @@ to built-in defaults for any key that's missing:
 `temp_dir` in `config.json` must point at paths that actually exist on
 your machine — update them if you move or rename this project folder.
 
+### Linux / Docker
+
+The server itself is plain, portable Python (`pathlib` throughout, no
+hardcoded Windows paths); the defaults baked into the code just add
+`.exe` when running on Windows (`os.name == "nt"`) and leave binary names
+bare otherwise. Everything that actually differs between platforms —
+where the binaries and models live — is controlled entirely by
+`config.json`, so a Linux/Docker deployment is just a different config,
+e.g.:
+
+```json
+{
+  "whisper_path": "/opt/whisper.cpp/build/bin/whisper-cli",
+  "whisper_model": "/models/ggml-base.bin",
+  "ffmpeg_path": "/usr/bin/ffmpeg",
+  "piper_path": "/opt/piper/piper",
+  "piper_model": "/models/en_US-lessac-medium.onnx",
+  "ffplay_path": "/usr/bin/ffplay",
+  "temp_dir": "/tmp/mcp-speech-tools",
+  "default_language": "auto",
+  "command_timeout_seconds": 600,
+  "cleanup_stale_after_seconds": 3600
+}
+```
+
+`whisper_model`/`piper_model` can be absolute paths too (as above) instead
+of a bare filename resolved next to `whisper_path`/`piper_path` — useful
+when models are mounted from a separate volume.
+
+**`speak()` needs an actual audio output device.** `ffplay` plays through
+whatever audio system is available; a headless/minimal container has none
+by default. For STT-only use (no `speak()`/`synthesize_to_file()` calls)
+this doesn't matter. For TTS playback in a container, you'll need to wire
+up audio (e.g. PulseAudio/ALSA passed through, or a virtual sink) — that's
+host/container audio configuration, not something this script can do on
+its own.
+
 ## MCP tools
 
 ### Speech-to-text

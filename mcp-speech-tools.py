@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import atexit
 import json
+import os
 import re
 import subprocess
 import threading
@@ -53,13 +54,22 @@ except ImportError:
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_FILE = BASE_DIR / "config.json"
 
+
+def _exe(name: str) -> str:
+    """Append .exe on Windows only; Linux/macOS binaries have no extension."""
+    return name + ".exe" if os.name == "nt" else name
+
+
 DEFAULT_CONFIG = {
-    "whisper_path": str(BASE_DIR / "bin" / "whisper" / "whisper-cli.exe"),
+    # All of these are just fallbacks for whatever config.json doesn't
+    # override — on Linux/Docker, point them at your actual binaries (see
+    # README "Linux / Docker" section), e.g. "/opt/whisper.cpp/build/bin/whisper-cli".
+    "whisper_path": str(BASE_DIR / "bin" / "whisper" / _exe("whisper-cli")),
     "whisper_model": "ggml-base.bin",
-    "ffmpeg_path": str(BASE_DIR / "bin" / "ffmpeg" / "ffmpeg.exe"),
-    "piper_path": str(BASE_DIR / "bin" / "piper" / "piper.exe"),
+    "ffmpeg_path": str(BASE_DIR / "bin" / "ffmpeg" / _exe("ffmpeg")),
+    "piper_path": str(BASE_DIR / "bin" / "piper" / _exe("piper")),
     "piper_model": "nl_NL-pim-medium.onnx",
-    "ffplay_path": str(BASE_DIR / "bin" / "ffmpeg" / "ffplay.exe"),
+    "ffplay_path": str(BASE_DIR / "bin" / "ffmpeg" / _exe("ffplay")),
     "temp_dir": str(BASE_DIR / "temp"),
     "default_language": "auto",
     "command_timeout_seconds": 600,
@@ -96,7 +106,7 @@ FFPLAY = Path(CONFIG["ffplay_path"]).expanduser()
 
 
 def resolve_model_path(model: str | None) -> Path:
-    """Resolve a model filename against the whisper-cli.exe folder, unless already absolute."""
+    """Resolve a model filename against the whisper-cli executable's folder, unless already absolute."""
     name = model or CONFIG["whisper_model"]
     p = Path(name).expanduser()
     if not p.is_absolute():
@@ -105,7 +115,7 @@ def resolve_model_path(model: str | None) -> Path:
 
 
 def resolve_voice_path(voice: str | None) -> Path:
-    """Resolve a Piper voice filename against the piper.exe folder, unless already absolute."""
+    """Resolve a Piper voice filename against the piper executable's folder, unless already absolute."""
     name = voice or CONFIG["piper_model"]
     p = Path(name).expanduser()
     if not p.is_absolute():
@@ -172,7 +182,7 @@ def _run_hidden(exe: Path, args: list[str], timeout: int, input_text: str | None
 def run_whisper(args: list[str], timeout: int | None = None) -> subprocess.CompletedProcess[str]:
     if not WHISPER_CLI.is_file():
         raise FileNotFoundError(
-            f"whisper-cli.exe not found: {WHISPER_CLI}. "
+            f"whisper-cli executable not found: {WHISPER_CLI}. "
             f"Set 'whisper_path' in {CONFIG_FILE} (see bin/whisper/README.md for download info)."
         )
 
@@ -182,7 +192,7 @@ def run_whisper(args: list[str], timeout: int | None = None) -> subprocess.Compl
 def run_ffmpeg(args: list[str], timeout: int | None = None) -> subprocess.CompletedProcess[str]:
     if not FFMPEG.is_file():
         raise FileNotFoundError(
-            f"ffmpeg.exe not found: {FFMPEG}. "
+            f"ffmpeg executable not found: {FFMPEG}. "
             f"Set 'ffmpeg_path' in {CONFIG_FILE} (see bin/ffmpeg/README.md for download info)."
         )
 
@@ -192,7 +202,7 @@ def run_ffmpeg(args: list[str], timeout: int | None = None) -> subprocess.Comple
 def run_piper(args: list[str], input_text: str, timeout: int | None = None) -> subprocess.CompletedProcess[str]:
     if not PIPER.is_file():
         raise FileNotFoundError(
-            f"piper.exe not found: {PIPER}. "
+            f"piper executable not found: {PIPER}. "
             f"Set 'piper_path' in {CONFIG_FILE} (see bin/piper/README.md for download info)."
         )
 
@@ -345,7 +355,7 @@ def _play_wav_async(wav_path: Path, text: str, voice_name: str) -> subprocess.Po
     """Launch ffplay in the background (no window, not waited on) and track it for get_status()/stop_playback()."""
     if not FFPLAY.is_file():
         raise FileNotFoundError(
-            f"ffplay.exe not found: {FFPLAY}. "
+            f"ffplay executable not found: {FFPLAY}. "
             f"Set 'ffplay_path' in {CONFIG_FILE} (see bin/ffmpeg/README.md for download info)."
         )
 
