@@ -1,0 +1,48 @@
+services:
+  mcp-speech-tools:
+    image: python:3.12-slim
+    container_name: mcp-speech-tools
+    restart: unless-stopped
+
+    working_dir: /app
+
+    ports:
+      - "3335:8000"
+
+    volumes:
+      - /opt/n8n-workspace:/opt/n8n-workspace
+      - mcp_speech_app:/app
+      - whisper_cpp:/opt/whisper.cpp
+      - whisper_models:/models
+
+    command:
+      - /bin/sh
+      - -c
+      - |
+          set -e
+          apt-get update
+          apt-get install -y --no-install-recommends git build-essential cmake ffmpeg curl ca-certificates
+          rm -rf /var/lib/apt/lists/*
+          pip install --no-cache-dir mcp
+
+          if [ ! -f /app/mcp-speech-tools.py ]; then git clone https://github.com/DomoticX/mcp-speech-tools.git /app; else cd /app && git pull || true; fi
+
+          if [ -f /app/requirements.txt ]; then pip install --no-cache-dir -r /app/requirements.txt; fi
+
+          if [ ! -f /opt/whisper.cpp/build/bin/whisper-cli ]; then rm -rf /opt/whisper.cpp/* && git clone https://github.com/ggerganov/whisper.cpp.git /tmp/whisper.cpp && cp -a /tmp/whisper.cpp/. /opt/whisper.cpp/ && rm -rf /tmp/whisper.cpp && cd /opt/whisper.cpp && cmake -B build && cmake --build build -j$(nproc); fi
+
+          mkdir -p /models
+
+          if [ ! -f /models/ggml-base.bin ]; then echo "Downloading Whisper base model..." && curl -L https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin -o /models/ggml-base.bin; fi
+
+          mkdir -p /tmp/mcp-speech-tools
+
+          printf '%s\n' '{' '"whisper_path": "/opt/whisper.cpp/build/bin/whisper-cli",' '"whisper_model": "/models/ggml-base.bin",' '"ffmpeg_path": "/usr/bin/ffmpeg",' '"piper_path": "/app/bin/piper/piper",' '"piper_model": "jarvis-high.onnx",' '"ffplay_path": "/usr/bin/ffplay",' '"temp_dir": "/tmp/mcp-speech-tools",' '"default_language": "auto",' '"command_timeout_seconds": 600,' '"cleanup_stale_after_seconds": 3600' '}' > /app/config.json
+
+          cd /app
+          exec python mcp-speech-tools.py --transport streamable-http --host 0.0.0.0 --port 8000
+
+volumes:
+  mcp_speech_app:
+  whisper_cpp:
+  whisper_models:
